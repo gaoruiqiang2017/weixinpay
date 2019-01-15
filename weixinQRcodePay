@@ -1,0 +1,156 @@
+微信扫描二维码支付
+
+## **先创建Springboot项目**
+## pom文件添加依赖
+```
+        <!--微信支付SDK-->
+        <dependency>
+            <groupId>com.github.wxpay</groupId>
+            <artifactId>wxpay-sdk</artifactId>
+            <version>0.0.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.httpcomponents</groupId>
+            <artifactId>httpclient</artifactId>
+            <version>4.5.5</version>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>fastjson</artifactId>
+            <version>1.2.47</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.3.0</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>javase</artifactId>
+            <version>3.0.0</version>
+        </dependency>
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>2.6</version>
+        </dependency>
+```
+## utils工具类(可使用自己项目的)
+
+```
+public class HttpUtil {
+
+    public static String doPost(String url, String requestXml) {
+        CloseableHttpClient httpClient = null;
+        CloseableHttpResponse httpResponse = null;
+        //创建httpClient连接对象
+        httpClient = HttpClients.createDefault();
+        //创建post请求连接对象
+        HttpPost httpPost = new HttpPost(url);
+        //创建连接请求对象,并设置连接参数
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setConnectTimeout(15000)   //连接服务区主机超时时间
+                .setConnectionRequestTimeout(60000) //连接请求超时时间
+                .setSocketTimeout(60000).build(); //设置读取响应数据超时时间
+        //为httppost请求设置参数
+        httpPost.setConfig(requestConfig);
+        //将上传参数放到entity属性中
+        httpPost.setEntity(new StringEntity(requestXml, "UTF-8"));
+        //添加头信息
+        httpPost.addHeader("Content-type", "text/xml");
+        String result = "";
+        try {
+            //发送请求
+            httpResponse = httpClient.execute(httpPost);
+            //从相应对象中获取返回内容
+            HttpEntity entity = httpResponse.getEntity();
+            result = EntityUtils.toString(entity, "UTF-8");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return result;
+
+    }
+
+```
+## Controller接口
+
+```
+@RestController
+@RequestMapping("/weixinpay")
+public class Weixinpay {
+    
+ 
+
+    @Value("${appid}")
+    private String appid;  //公众账号id
+
+    @Value("${mchid}")
+    private String mchId;  //商户号
+
+    @Value("${weixinKey}")
+    private String weixinKey;  //密匙
+
+    @Value("${unifiedorderUrl}")
+    private String unifiedorderUrl; //统一下单接口
+
+    /**
+     * @param httpServletRequest
+     * @param httpServletResponse
+     * @param orderNo             订单号 (前面要创建自己的订单)
+     * @param money               金额
+     * @param body                商品内容
+     */
+    @RequestMapping("/pay")
+    public void pay(HttpServletRequest httpServletRequest, HttpServletResponse
+            httpServletResponse, String orderNo, String money, String body)
+            throws Exception {
+        try {
+            HashMap<String, String> dataMap = new HashMap<>();
+            dataMap.put("appid", appid); //公众账号ID
+            dataMap.put("mch_id", mchId); //商户号
+            dataMap.put("nonce_str", WXPayUtil.generateNonceStr()); //随机字符串，长度要求在32位以内。
+            dataMap.put("body", body); //商品描述
+            dataMap.put("out_trade_no", orderNo); //商品订单号
+            dataMap.put("total_fee", money); //商品金
+            dataMap.put("spbill_create_ip", InetAddress.getLocalHost().getHostAddress()); //客户端ip
+            dataMap.put("notify_url", "www.baidu.com"); //通知地址(假设是百度)
+            dataMap.put("trade_type", "NATIVE"); //交易类型
+            dataMap.put("product_id", "1"); //trade_type=NATIVE时，此参数必传。商品ID，商户自行定义。
+            //生成签名
+            String signature = WXPayUtil.generateSignature(dataMap, weixinKey);
+            dataMap.put("sign", signature);//签名
+            //将类型为map的参数转换为xml
+            String requestXml = WXPayUtil.mapToXml(dataMap);
+            //发送参数,调用微信统一下单接口,返回xml
+            String responseXml = HttpUtil.doPost(unifiedorderUrl, requestXml);
+            Map<String, String> map = WXPayUtil.xmlToMap(responseXml);
+            if (map.get("return_code").toString().equals("SUCCESS") && map.get("result_code")
+                    .toString().equals("SUCCESS")) {
+                String urlCode = (String) map.get("code_url"); //微信二维码短链接
+                // 生成微信二维码(或者直接传给前端处理)
+                Hashtable<EncodeHintType, String> hints = new Hashtable<EncodeHintType, String>();
+                // 内容所使用编码
+                hints.put(EncodeHintType.CHARACTER_SET, "utf-8");
+                BitMatrix bitMatrix = new MultiFormatWriter().encode(urlCode, BarcodeFormat
+                        .QR_CODE, 300, 300, hints);
+                // 生成二维码
+                MatrixToImageWriter.writeToFile(bitMatrix, "gif", new File("C:/downloads/二维码文件" +
+                        ".gif"));
+            } else {
+            }
+        } catch (Exception e) {
+
+        }
+    }
+	
+	//自定义回调接口
+    @RequestMapping("/notifyUrl")
+    public String notifyUrl(String unifiedorderUrl, String requestXml) {
+        System.out.print("h");
+        //扫码支付完成之后回调接口,修改订单状态
+        return "回调成功";
+
+    }
+}
+```
